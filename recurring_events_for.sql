@@ -17,18 +17,45 @@ DECLARE
   next_time_in_zone TIME;
   duration INTERVAL;
   time_offset INTERVAL;
-  recurrences_start DATE := CASE WHEN (timezone('UTC', range_start) AT TIME ZONE time_zone) < range_start THEN (timezone('UTC', range_start) AT TIME ZONE time_zone)::date ELSE range_start END;
-  recurrences_end DATE := CASE WHEN (timezone('UTC', range_end) AT TIME ZONE time_zone) > range_end THEN (timezone('UTC', range_end) AT TIME ZONE time_zone)::date ELSE range_end END;
+  r_start DATE := (timezone('UTC', range_start) AT TIME ZONE time_zone)::DATE;
+  r_end DATE := (timezone('UTC', range_end) AT TIME ZONE time_zone)::DATE;
+
+  recurrences_start DATE := CASE WHEN r_start < range_start THEN r_start ELSE range_start END;
+  recurrences_end DATE := CASE WHEN r_end > range_end THEN r_end ELSE range_end END;
+  
+  inc_interval INTERVAL := '2 days'::INTERVAL;
+
+  ext_start TIMESTAMP := range_start::TIMESTAMP - inc_interval;
+  ext_end   TIMESTAMP := range_end::TIMESTAMP   + inc_interval;
 BEGIN
   FOR event IN
     SELECT *
       FROM events
       WHERE
-        frequency <> 'once' OR
-        (frequency = 'once' AND
-          ((starts_on IS NOT NULL AND ends_on IS NOT NULL AND starts_on <= (timezone('UTC', range_end) AT TIME ZONE time_zone)::date AND ends_on >= (timezone('UTC', range_start) AT TIME ZONE time_zone)::date) OR
-           (starts_on IS NOT NULL AND starts_on <= (timezone('UTC', range_end) AT TIME ZONE time_zone)::date AND starts_on >= (timezone('UTC', range_start) AT TIME ZONE time_zone)::date) OR
+        status > 0 
+        AND
+        (
+          (frequency = 'once' AND
+          ((starts_on IS NOT NULL AND ends_on IS NOT NULL AND starts_on <= r_end AND ends_on >= r_start) OR
+           (starts_on IS NOT NULL AND starts_on <= r_end AND starts_on >= r_start) OR
            (starts_at <= range_end AND ends_at >= range_start)))
+
+          OR
+
+          ( 
+            frequency <> 'once' AND 
+            (
+              ( starts_on IS NOT NULL AND starts_on <= ext_end ) OR
+              ( starts_at IS NOT NULL AND starts_at <= ext_end )
+            ) AND (
+              (until IS NULL AND ends_at IS NULL AND ends_on IS NULL) OR
+              (until IS NOT NULL AND until <= ext_end) OR
+              (ends_on IS NOT NULL AND ends_on <= ext_end) OR
+              (ends_at IS NOT NULL AND ends_at <= ext_end)
+            )
+          )
+        )
+        
   LOOP
     IF event.frequency = 'once' THEN
       RETURN NEXT event;
@@ -71,15 +98,15 @@ BEGIN
     LOOP
       -- All-day event
       IF event.starts_on IS NOT NULL AND event.ends_on IS NULL THEN
-        CONTINUE WHEN next_date < (timezone('UTC', range_start) AT TIME ZONE time_zone)::date OR next_date > (timezone('UTC', range_end) AT TIME ZONE time_zone)::date;
+        CONTINUE WHEN next_date < r_start OR next_date > r_end;
         event.starts_on := next_date;
 
       -- Multi-day event
       ELSIF event.starts_on IS NOT NULL AND event.ends_on IS NOT NULL THEN
         event.starts_on := next_date;
-        CONTINUE WHEN event.starts_on > (timezone('UTC', range_end) AT TIME ZONE time_zone)::date;
+        CONTINUE WHEN event.starts_on > r_end;
         event.ends_on := next_date + duration;
-        CONTINUE WHEN event.ends_on < (timezone('UTC', range_start) AT TIME ZONE time_zone)::date;
+        CONTINUE WHEN event.ends_on < r_start;
 
       -- Timespan event
       ELSE

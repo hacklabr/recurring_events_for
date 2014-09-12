@@ -21,12 +21,13 @@ def executing(statements)
   results = []
   begin
     [statements].flatten.each do |statement|
-      $db_conn.query(statement).each do |result|
+
+      $db_conn.query('SET TIMEZONE TO UTC;' + statement).each do |result|
         results.push(result.values)
       end.clear
     end
   ensure
     $db_conn.exec "ROLLBACK"
   end
-  results
+  results.sort
 end

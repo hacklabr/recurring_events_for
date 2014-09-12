@@ -15,7 +15,8 @@ CREATE TABLE events (
   separation integer not null default 1 constraint positive_separation check (separation > 0),
   count integer,
   "until" date,
-  timezone_name text not null default 'Etc/UTC'
+  timezone_name text not null default 'Etc/UTC',
+  status integer not null default 1
 );
 
 CREATE TABLE event_recurrences (
